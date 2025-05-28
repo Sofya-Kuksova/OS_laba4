@@ -1,36 +1,38 @@
 #include "SharedMemory.h"
 #include <stdexcept>
 
-SharedMemory::SharedMemory(const std::wstring& name, size_t size)
-    : size(size) {
-    hMapFile = CreateFileMappingW(
-        INVALID_HANDLE_VALUE, nullptr,
-        PAGE_READWRITE, 0,
-        static_cast<DWORD>(size),
-        name.c_str()
-    );
-    if (!hMapFile) {
-        DWORD err = GetLastError();
-        throw std::runtime_error("CreateFileMapping failed, err=" + std::to_string(err));
+SharedMemory::SharedMemory(const std::wstring& name, size_t size) 
+    : m_handle(NULL), m_data(NULL), m_createdNew(false) {
+    
+    // Пытаемся открыть существующий объект
+    m_handle = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, name.c_str());
+    
+    if (m_handle == NULL) {
+        // Создаем новый объект
+        m_handle = CreateFileMappingW(
+            INVALID_HANDLE_VALUE,
+            NULL,
+            PAGE_READWRITE,
+            0,
+            static_cast<DWORD>(size),
+            name.c_str()
+        );
+        
+        if (m_handle == NULL) {
+            throw std::runtime_error("CreateFileMapping failed");
+        }
+        m_createdNew = true;  // Устанавливаем флаг создания
     }
-
-    lpBaseAddress = MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, size);
-    if (!lpBaseAddress)
-        throw std::runtime_error("Failed to map view of file.");
-
-    VirtualLock(lpBaseAddress, size);
+    
+    // Отображаем память в адресное пространство
+    m_data = MapViewOfFile(m_handle, FILE_MAP_ALL_ACCESS, 0, 0, size);
+    if (m_data == NULL) {
+        CloseHandle(m_handle);
+        throw std::runtime_error("MapViewOfFile failed");
+    }
 }
 
 SharedMemory::~SharedMemory() {
-    VirtualUnlock(lpBaseAddress, size);
-    UnmapViewOfFile(lpBaseAddress);
-    CloseHandle(hMapFile);
-}
-
-void* SharedMemory::getData() {
-    return lpBaseAddress;
-}
-
-size_t SharedMemory::getSize() const {
-    return size;
+    if (m_data) UnmapViewOfFile(m_data);
+    if (m_handle) CloseHandle(m_handle);
 }
