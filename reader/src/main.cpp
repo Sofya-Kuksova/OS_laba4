@@ -1,23 +1,19 @@
-// reader.cpp: процесс-чтение (consumer)
+// reader.cpp
 #include <windows.h>
-#include <mmsystem.h>    // для timeGetTime
+#include <mmsystem.h>
 #include <iostream>
 #include <string>
 #include <random>
-
-#include "SharedMemory.h"    // общая память
-#include "SyncObjects.h"     // мьютексы
-#include "Logger.h"          // логирование
-
-#pragma comment(lib, "winmm.lib")  // линковка библиотеки для timeGetTime
+#include "SharedMemory.h"
+#include "SyncObjects.h"
+#include "Logger.h"
+#pragma comment(lib, "winmm.lib")
 
 int main(int argc, char* argv[]) {
-    // Имена объектов разделяемой памяти и мьютексов для читателей/писателя
+    
     const std::wstring shmName        = L"Lab4_SharedMem";
     const std::wstring mxReadersName  = L"Lab4_ReadersMutex";
     const std::wstring mxWriteName    = L"Lab4_WriteMutex";
-
-    // Проверка аргументов: ожидаем идентификатор процесса
     if (argc < 2) {
         std::cerr << "Usage: reader.exe <id>\n";
         return 1;
@@ -25,63 +21,66 @@ int main(int argc, char* argv[]) {
     const std::string idStr   = argv[1];
     const std::string logName = "reader_" + idStr + ".log";
 
-    // Размер страницы системы
     SYSTEM_INFO si;
     GetSystemInfo(&si);
     size_t pageSize = si.dwPageSize;
 
-    // Параметры разделяемой памяти
     size_t pageCount   = 12;
-    size_t controlSize = sizeof(int);                    // под счётчик читателей
+    size_t controlSize = sizeof(int) + pageCount * sizeof(char);
     size_t shmSize     = controlSize + pageCount * pageSize;
 
-    // Открываем разделяемую память
     SharedMemory shm(shmName, shmSize);
-    char* base = static_cast<char*>(shm.getData());    // указатель на начало
-    int* readersCount = reinterpret_cast<int*>(base);  // счётчик читателей хранится в первых 4 байтах
-  
-    // Создаём/открываем мьютексы
-    SyncObjects mxReaders(mxReadersName);  // защищает счётчик читателей
-    SyncObjects mxWrite(mxWriteName);      // синхронизирует с писателем
+    char* base = static_cast<char*>(shm.getData());
+    int* readersCount = reinterpret_cast<int*>(base);
+    char* pageStates = base + sizeof(int);
+    char* buffer = base + controlSize;
 
-    // Логгер для записи событий
+    SyncObjects mxReaders(mxReadersName);
+    SyncObjects mxWrite(mxWriteName);
     Logger logger(logName);
 
-    // Устанавливаем разрешение таймера в 1 мс
     timeBeginPeriod(1);
-
-    // Генерация случайных задержек по времени
     std::mt19937 gen((unsigned)timeGetTime());
     std::uniform_int_distribution<> dist(500, 1500);
 
-    // Основной цикл: 10 итераций чтения
     for (int iter = 0; iter < 10; ++iter) {
         logger.log("WAITING to read");
-        // Вход в раздел чтения: увеличиваем счётчик
+        
         mxReaders.lock();
         if ((*readersCount)++ == 0) {
-            // если это первый читатель — блокируем писателя
             mxWrite.lock();
         }
         mxReaders.unlock();
 
-        // Выполняем чтение
-        int page = gen() % pageCount;
-        logger.log("START READING page " + std::to_string(page));
-        Sleep(dist(gen));                             // имитация операции чтения
-        logger.log("END READING   page " + std::to_string(page));
+        // Ищем ГРЯЗНУЮ страницу (состояние 1) для чтения
+        int page = -1;
+        int attempts = pageCount * 2;
+        while (attempts-- > 0) {
+            int candidate = gen() % pageCount;
+            if (pageStates[candidate] == 1) {
+                page = candidate;
+                break;
+            }
+        }
 
-        // Выход из раздела чтения: уменьшаем счётчик
+        if (page != -1) {
+            logger.log("START READING page " + std::to_string(page));
+            Sleep(dist(gen));
+            logger.log("END READING   page " + std::to_string(page));
+            // После чтения помечаем страницу как ЧИСТУЮ (0)
+            pageStates[page] = 0;
+        } else {
+            logger.log("SKIPPED READING - no dirty pages available");
+        }
+
         mxReaders.lock();
         if (--(*readersCount) == 0) {
-            // если был последний читатель — разблокируем писателя
             mxWrite.unlock();
         }
         mxReaders.unlock();
         logger.log("RELEASED reading");
     }
 
-    // Возврат периода таймера
     timeEndPeriod(1);
     return 0;
 }
