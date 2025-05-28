@@ -1,4 +1,3 @@
-// reader.cpp
 #include <windows.h>
 #include <mmsystem.h>
 #include <iostream>
