@@ -3,7 +3,7 @@ REM Удаляет все логи reader_*.log и writer_*.log из папки 
 setlocal
 
 REM Получаем абсолютный путь к analysis
-set LOG_DIR=%~dp0..\analysis
+set LOG_DIR=%~dp0..\analysis\logs
 
 if not exist "%LOG_DIR%" (
     echo Directory "%LOG_DIR%" does not exist. Creating it...
