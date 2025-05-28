@@ -6,12 +6,12 @@ class SharedMemory {
 public:
     SharedMemory(const std::wstring& name, size_t size);
     ~SharedMemory();
-
-    void* getData();
-    size_t getSize() const;
+    
+    void* getData() const { return m_data; }
+    bool createdNew() const { return m_createdNew; }  // Добавлен новый метод
 
 private:
-    HANDLE hMapFile;
-    LPVOID lpBaseAddress;
-    size_t size;
+    HANDLE m_handle;
+    void* m_data;
+    bool m_createdNew;  // Флаг создания нового объекта
 };
